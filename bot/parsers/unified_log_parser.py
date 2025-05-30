@@ -376,7 +376,7 @@ class UnifiedLogParser:
                             if embed:
                                 embeds.append(embed)
                                 processed_events += 1
-                                logger.debug(f"Line {line_idx+1}: {pattern_name} - {mission_id}")
+                                logger.info(f"📋 Processed {pattern_name}: {mission_id if 'mission_id' in locals() else 'event'}")
 
                             # Safety check - prevent massive embed generation
                             if processed_events > len(lines) * 2:

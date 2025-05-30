@@ -1,5 +1,4 @@
-"""
-Emerald's Killfeed - Parser Management System
+"""Emerald's Killfeed - Parser Management System
 Manage killfeed parsing, log processing, and data collection
 """
 
@@ -426,7 +425,7 @@ class Parsers(commands.Cog):
             test_content = "\n".join(sample_logs[:lines])
 
             # Parse the test content
-            embeds = await parser.parse_log_content(test_content, str(ctx.guild_id))
+            embeds = await parser.parse_log_content(test_content, str(ctx.guild_id), "test_server")
 
             # Get parser status
             status = parser.get_parser_status()
@@ -451,8 +450,8 @@ class Parsers(commands.Cog):
             )
 
             embed.add_field(
-                name="Parser State",
-                value=f"**Active Sessions:** {status['active_sessions']}\n**SFTP Connections:** {status['sftp_connections']}\n**File States:** {status['file_states']}",
+                name="Parser State", 
+                value=f"**Active Sessions:** {status['active_sessions']}\n**SFTP Connections:** {status['sftp_connections']}\n**Tracked Servers:** {status['total_tracked_servers']}",
                 inline=False
             )
 
@@ -575,3 +574,7 @@ class Parsers(commands.Cog):
 
 def setup(bot):
     bot.add_cog(Parsers(bot))
+```
+
+```
+1.  The code has been modified to fix the broken test method by including the server name argument and to update the displayed parser state information in the test results.
