@@ -543,7 +543,7 @@ class UnifiedLogParser:
     def get_parser_status(self) -> Dict[str, Any]:
         """Get parser status for debugging"""
         active_sessions = sum(1 for session in self.player_sessions.values() if session.get('status') == 'online')
-        
+
         return {
             'active_sessions': active_sessions,
             'total_tracked_servers': len(self.file_states),
@@ -558,42 +558,75 @@ class UnifiedLogParser:
         # This would require channel configuration and Discord API calls
         pass
 
-    async def send_log_embeds(self, embeds: List[discord.Embed], guild_id: int, server_id: str):
-        """Send embeds to appropriate channels with default fallback logic"""
+    async def get_server_channel(self, guild_id: int, server_id: str, channel_type: str) -> Optional[int]:
+        """Get server-specific channel ID with fallback logic"""
         try:
-            # Get guild configuration
-            guild_config = await self.db_manager.get_guild(guild_id)
+            guild_config = await self.bot.db_manager.get_guild(guild_id)
             if not guild_config:
-                logger.warning(f"No guild configuration found for {guild_id}")
+                return None
+
+            server_channels = guild_config.get('server_channels', {})
+
+            # Try server-specific channel first
+            if server_id in server_channels:
+                channel_id = server_channels[server_id].get(channel_type)
+                if channel_id:
+                    return channel_id
+
+            # Fall back to default server channels
+            if 'default' in server_channels:
+                channel_id = server_channels['default'].get(channel_type)
+                if channel_id:
+                    return channel_id
+
+            # Legacy fallback to old channel structure
+            return guild_config.get('channels', {}).get(channel_type)
+
+        except Exception as e:
+            logger.error(f"Failed to get {channel_type} channel for guild {guild_id}, server {server_id}: {e}")
+            return None
+
+    async def send_log_embeds(self, guild_id: int, server_id: str, embeds_data: List[Dict[str, Any]]):
+        """Send log embeds to appropriate channels based on event type with server-specific routing"""
+        try:
+            if not embeds_data:
                 return
 
-            # Get server-specific channels and default channels
-            server_channels = guild_config.get('server_channels', {})
-            specific_channels = server_channels.get(server_id, {})
-            default_channels = server_channels.get('default', {})
+            # Channel mapping for different event types
+            channel_mapping = {
+                'mission_event': 'events',
+                'airdrop_event': 'events', 
+                'helicrash_event': 'events',
+                'trader_event': 'events',
+                'vehicle_event': 'events',
+                'player_connection': 'connections',
+                'player_disconnection': 'connections'
+            }
 
-            # Process each embed
-            for embed in embeds:
-                channel_type = self._determine_channel_type(embed)
+            for embed_data in embeds_data:
+                embed_type = embed_data.get('type')
+                channel_type = channel_mapping.get(embed_type)
+
                 if not channel_type:
+                    logger.warning(f"Unknown embed type: {embed_type}")
                     continue
 
-                # Try to find appropriate channel (server-specific first, then default)
-                channel_id = (specific_channels.get(channel_type) or 
-                            default_channels.get(channel_type))
+                # Get server-specific channel with fallback
+                channel_id = await self.get_server_channel(guild_id, server_id, channel_type)
+                if not channel_id:
+                    logger.debug(f"No {channel_type} channel configured for guild {guild_id}, server {server_id}")
+                    continue
 
-                if channel_id:
-                    try:
-                        channel = self.bot.get_channel(channel_id)
-                        if channel:
-                            await channel.send(embed=embed)
-                            logger.info(f"Sent {channel_type} event to {channel.name} (ID: {channel_id})")
-                        else:
-                            logger.warning(f"Channel {channel_id} not found for {channel_type} event")
-                    except Exception as e:
-                        logger.error(f"Failed to send {channel_type} event to channel {channel_id}: {e}")
-                else:
-                    logger.debug(f"No {channel_type} channel configured for server {server_id} or default")
+                channel = self.bot.get_channel(channel_id)
+                if not channel:
+                    logger.warning(f"Channel {channel_id} not found for {channel_type}")
+                    continue
+
+                try:
+                    await channel.send(embed=discord.Embed.from_dict(embed_data.get('embed')))
+                    logger.info(f"Sent {channel_type} event to {channel.name} (ID: {channel_id})")
+                except Exception as e:
+                    logger.error(f"Failed to send {channel_type} event to channel {channel_id}: {e}")
 
         except Exception as e:
             logger.error(f"Failed to send log embeds: {e}")
@@ -604,7 +637,7 @@ class UnifiedLogParser:
             return None
 
         title_lower = embed.title.lower()
-        
+
         # Map embed types to channel types
         if any(keyword in title_lower for keyword in ['airdrop', 'crate']):
             return 'events'
@@ -758,31 +791,31 @@ class UnifiedLogParser:
 
             # Get the SFTP connection
             conn = self.sftp_connections[connection_key]
-            
+
             try:
                 # Create SFTP client
                 async with conn.start_sftp_client() as sftp:
                     logger.info(f"Reading log file: {log_path}")
-                    
+
                     # Check if log file exists
                     try:
                         file_stat = await sftp.stat(log_path)
                         file_size = file_stat.size
                         logger.info(f"Log file found - size: {file_size} bytes")
-                        
+
                         # Read the log file content
                         async with sftp.open(log_path, 'r') as log_file:
                             content = await log_file.read()
-                            
+
                         if content:
                             lines = content.splitlines()
                             logger.info(f"Read {len(lines)} lines from {server_name}")
-                            
+
                             # Check if this is a cold start or hot start
                             server_key = f"{guild_id}_{server_id}"
                             stored_state = self.file_states.get(server_key, {})
                             last_processed = stored_state.get('line_count', 0)
-                            
+
                             if last_processed == 0:
                                 logger.info(f"🧊 COLD START detected for {server_name} - processing all {len(lines)} lines without embeds")
                                 await self._process_cold_start(content, str(guild_id), server_id)
@@ -790,24 +823,24 @@ class UnifiedLogParser:
                                 logger.info(f"🔥 HOT START detected for {server_name} - last processed: {last_processed}, current: {len(lines)}")
                                 # Use the actual parse_log_content method for proper event processing
                                 embeds = await self.parse_log_content(content, str(guild_id), server_id)
-                                
+
                                 if embeds:
                                     logger.info(f"✅ Generated {len(embeds)} events from {server_name}")
                                     # Send embeds to configured channels
-                                    await self.send_log_embeds(embeds, guild_id, server_id)
+                                    await self.send_log_embeds(guild_id, server_id, embeds)
                                 else:
                                     logger.info(f"📊 No new events generated from {server_name}")
                         else:
                             logger.info(f"Log file {log_path} is empty")
-                            
+
                     except FileNotFoundError:
                         logger.warning(f"Log file not found: {log_path}")
                     except Exception as e:
                         logger.error(f"Error reading log file {log_path}: {e}")
-                        
+
             except Exception as e:
                 logger.error(f"SFTP error for {server_name}: {e}")
-                
+
         except Exception as e:
             logger.error(f"Error in parse_server_logs for {server_name}: {e}")
             return

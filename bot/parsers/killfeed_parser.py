@@ -284,13 +284,13 @@ class KillfeedParser:
                 )
 
             # Send killfeed embed using EmbedFactory
-            await self.send_killfeed_embed(guild_id, kill_data)
+            await self.send_killfeed_embed(guild_id, server_id, kill_data)
 
         except Exception as e:
             logger.error(f"Failed to process kill event: {e}")
 
-    async def send_killfeed_embed(self, guild_id: int, kill_data: Dict[str, Any]):
-        """Send killfeed embed to designated channel using EmbedFactory"""
+    async def send_killfeed_embed(self, guild_id: int, server_id: str, kill_data: Dict[str, Any]):
+        """Send killfeed embed to designated channel using EmbedFactory with server-specific routing"""
         try:
             from ..utils.embed_factory import EmbedFactory
 
@@ -299,12 +299,29 @@ class KillfeedParser:
             if not guild_config:
                 return
 
-            killfeed_channel_id = guild_config.get('channels', {}).get('killfeed')
+            # Try server-specific channel first, then fall back to default
+            server_channels = guild_config.get('server_channels', {})
+            killfeed_channel_id = None
+            
+            # Check server-specific channel
+            if server_id in server_channels:
+                killfeed_channel_id = server_channels[server_id].get('killfeed')
+            
+            # Fall back to default server channels
+            if not killfeed_channel_id and 'default' in server_channels:
+                killfeed_channel_id = server_channels['default'].get('killfeed')
+            
+            # Legacy fallback to old channel structure
             if not killfeed_channel_id:
+                killfeed_channel_id = guild_config.get('channels', {}).get('killfeed')
+            
+            if not killfeed_channel_id:
+                logger.debug(f"No killfeed channel configured for guild {guild_id}, server {server_id}")
                 return
 
             channel = self.bot.get_channel(killfeed_channel_id)
             if not channel:
+                logger.warning(f"Killfeed channel {killfeed_channel_id} not found for guild {guild_id}")
                 return
 
             # Get player stats for KDR display
