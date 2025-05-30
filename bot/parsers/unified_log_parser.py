@@ -675,6 +675,48 @@ class UnifiedLogParser:
                 except Exception as e:
                     logger.error(f"Failed to connect to {host}:{ssh_port}: {e}")
                     return
+
+            # Get the SFTP connection
+            conn = self.sftp_connections[connection_key]
+            
+            try:
+                # Create SFTP client
+                async with conn.start_sftp_client() as sftp:
+                    logger.info(f"Reading log file: {log_path}")
+                    
+                    # Check if log file exists
+                    try:
+                        file_stat = await sftp.stat(log_path)
+                        file_size = file_stat.st_size
+                        logger.info(f"Log file found - size: {file_size} bytes")
+                        
+                        # Read the log file content
+                        async with sftp.open(log_path, 'r') as log_file:
+                            content = await log_file.read()
+                            
+                        if content:
+                            lines = content.splitlines()
+                            logger.info(f"Processing {len(lines)} lines from {server_name}")
+                            
+                            # Process the log content (you can add specific parsing logic here)
+                            events_processed = 0
+                            for line in lines:
+                                if line.strip():  # Skip empty lines
+                                    # Add your specific log parsing logic here
+                                    events_processed += 1
+                            
+                            logger.info(f"Processed {events_processed} events from {server_name}")
+                        else:
+                            logger.info(f"Log file {log_path} is empty")
+                            
+                    except FileNotFoundError:
+                        logger.warning(f"Log file not found: {log_path}")
+                    except Exception as e:
+                        logger.error(f"Error reading log file {log_path}: {e}")
+                        
+            except Exception as e:
+                logger.error(f"SFTP error for {server_name}: {e}")
+                
         except Exception as e:
             logger.error(f"Error in parse_server_logs for {server_name}: {e}")
             return
