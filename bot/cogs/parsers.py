@@ -574,7 +574,3 @@ class Parsers(commands.Cog):
 
 def setup(bot):
     bot.add_cog(Parsers(bot))
-```
-
-```
-1.  The code has been modified to fix the broken test method by including the server name argument and to update the displayed parser state information in the test results.

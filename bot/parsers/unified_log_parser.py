@@ -688,7 +688,7 @@ class UnifiedLogParser:
                         try:
                             await self.parse_server_logs(guild_id, server)
                             total_servers_processed += 1
-                        except Exception as e:
+                        except Exceptionas e:
                             logger.error(f"Failed to parse logs for server {server.get('name', 'Unknown')}: {e}")
                             continue
 
@@ -816,13 +816,19 @@ class UnifiedLogParser:
                             stored_state = self.file_states.get(server_key, {})
                             last_processed = stored_state.get('line_count', 0)
 
-                            if last_processed == 0:
+                            is_warm_start = last_processed > 0
+
+                            if not is_warm_start:
                                 logger.info(f"🧊 COLD START detected for {server_name} - processing all {len(lines)} lines without embeds")
                                 await self._process_cold_start(content, str(guild_id), server_id)
                             else:
                                 logger.info(f"🔥 HOT START detected for {server_name} - last processed: {last_processed}, current: {len(lines)}")
                                 # Use the actual parse_log_content method for proper event processing
                                 embeds = await self.parse_log_content(content, str(guild_id), server_id)
+
+                                # Log parser status and results
+                                mode = "warm start" if is_warm_start else "cold start"
+                                logger.info(f"🔍 Parser running in {mode} mode - found {len(embeds)} events")
 
                                 if embeds:
                                     logger.info(f"✅ Generated {len(embeds)} events from {server_name}")
