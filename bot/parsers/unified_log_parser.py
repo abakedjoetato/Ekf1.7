@@ -687,7 +687,7 @@ class UnifiedLogParser:
                     # Check if log file exists
                     try:
                         file_stat = await sftp.stat(log_path)
-                        file_size = file_stat.st_size
+                        file_size = file_stat.size
                         logger.info(f"Log file found - size: {file_size} bytes")
                         
                         # Read the log file content
