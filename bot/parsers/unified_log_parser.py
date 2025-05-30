@@ -644,32 +644,37 @@ class UnifiedLogParser:
             # Create SFTP connection with host-specific key
             connection_key = f"{guild_id}_{server_id}_{host}_{ssh_port}"
 
-            try:
-                # Validate host format
-                if not host or not isinstance(host, str) or len(host.strip()) == 0:
-                    logger.error(f"Invalid host format for server {server_name}: '{host}'")
+            # Validate host format
+            if not host or not isinstance(host, str) or len(host.strip()) == 0:
+                logger.error(f"Invalid host format for server {server_name}: '{host}'")
+                return
+
+            host = host.strip()  # Clean any whitespace
+            logger.info(f"Attempting SFTP connection to: {host}:{ssh_port} with user: {ssh_user}")
+
+            # Use existing connection or create new one
+            if connection_key not in self.sftp_connections:
+                try:
+                    conn = await asyncssh.connect(
+                        host,
+                        port=ssh_port,
+                        username=ssh_user,
+                        password=ssh_password,
+                        known_hosts=None,
+                        client_keys=None,
+                        server_host_key_algs=['ssh-rsa', 'rsa-sha2-256', 'rsa-sha2-512'],
+                        kex_algs=['diffie-hellman-group14-sha256', 'diffie-hellman-group16-sha512', 'ecdh-sha2-nistp256', 'ecdh-sha2-nistp384', 'ecdh-sha2-nistp521'],
+                        encryption_algs=['aes128-ctr', 'aes192-ctr', 'aes256-ctr', 'aes128-cbc', 'aes192-cbc', 'aes256-cbc'],
+                        mac_algs=['hmac-sha2-256', 'hmac-sha2-512', 'hmac-sha1'],
+                        connect_timeout=30.0,  # 30 second timeout
+                        login_timeout=30.0,
+                        compression_algs=None  # Disable compression for better compatibility
+                    )
+                    self.sftp_connections[connection_key] = conn
+                    logger.info(f"Successfully connected to {host}:{ssh_port}")
+                except Exception as e:
+                    logger.error(f"Failed to connect to {host}:{ssh_port}: {e}")
                     return
-
-                host = host.strip()  # Clean any whitespace
-                logger.info(f"Attempting SFTP connection to: {host}:{ssh_port} with user: {ssh_user}")
-
-                # Use existing connection or create new one
-                if connection_key not in self.sftp_connections:
-                    try:
-                        conn = await asyncssh.connect(
-                            host,
-                            port=ssh_port,
-                            username=ssh_user,
-                            password=ssh_password,
-                            known_hosts=None,
-                            client_keys=None,
-                            server_host_key_algs=['ssh-rsa', 'rsa-sha2-256', 'rsa-sha2-512'],
-                            kex_algs=['diffie-hellman-group14-sha256', 'diffie-hellman-group16-sha512', 'ecdh-sha2-nistp256', 'ecdh-sha2-nistp384', 'ecdh-sha2-nistp521'],
-                            encryption_algs=['aes128-ctr', 'aes192-ctr', 'aes256-ctr', 'aes128-cbc', 'aes192-cbc', 'aes256-cbc'],
-                            mac_algs=['hmac-sha2-256', 'hmac-sha2-512', 'hmac-sha1'],
-                            connect_timeout=30.0,  # 30 second timeout
-                            login_timeout=30.0,
-                            compression_algs=None  # Disable compression for better compatibility
-                        )
-                        self.sftp_connections[connection_key] = conn
-                        logger.info(f
+        except Exception as e:
+            logger.error(f"Error in parse_server_logs for {server_name}: {e}")
+            return

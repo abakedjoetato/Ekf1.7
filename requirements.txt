@@ -63,3 +63,4 @@ paramiko
 py-cord
 pymongo
 python-dotenv
+py-cord==2.6.1
