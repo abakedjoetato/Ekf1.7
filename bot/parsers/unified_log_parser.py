@@ -688,7 +688,7 @@ class UnifiedLogParser:
                         try:
                             await self.parse_server_logs(guild_id, server)
                             total_servers_processed += 1
-                        except Exceptionas e:
+                        except Exception as e:
                             logger.error(f"Failed to parse logs for server {server.get('name', 'Unknown')}: {e}")
                             continue
 
