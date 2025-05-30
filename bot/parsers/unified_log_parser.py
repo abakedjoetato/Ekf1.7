@@ -540,6 +540,24 @@ class UnifiedLogParser:
 
         logger.info(f"Cleaned up all state for guild {guild_id}")
 
+    def get_parser_status(self) -> Dict[str, Any]:
+        """Get parser status for debugging"""
+        active_sessions = sum(1 for session in self.player_sessions.values() if session.get('status') == 'online')
+        
+        return {
+            'active_sessions': active_sessions,
+            'total_tracked_servers': len(self.file_states),
+            'sftp_connections': len(self.sftp_connections),
+            'file_states': {k: v for k, v in self.file_states.items()},
+            'connection_status': 'healthy' if self.sftp_connections else 'no_connections'
+        }
+
+    async def update_voice_channel(self, guild_id: str):
+        """Update voice channel player count (placeholder for future implementation)"""
+        # TODO: Implement voice channel player count updates
+        # This would require channel configuration and Discord API calls
+        pass
+
     async def run_log_parser(self):
         """Main parsing method - unified entry point with cold/hot start detection"""
         try:
@@ -696,16 +714,27 @@ class UnifiedLogParser:
                             
                         if content:
                             lines = content.splitlines()
-                            logger.info(f"Processing {len(lines)} lines from {server_name}")
+                            logger.info(f"Read {len(lines)} lines from {server_name}")
                             
-                            # Process the log content (you can add specific parsing logic here)
-                            events_processed = 0
-                            for line in lines:
-                                if line.strip():  # Skip empty lines
-                                    # Add your specific log parsing logic here
-                                    events_processed += 1
+                            # Check if this is a cold start or hot start
+                            server_key = f"{guild_id}_{server_id}"
+                            stored_state = self.file_states.get(server_key, {})
+                            last_processed = stored_state.get('line_count', 0)
                             
-                            logger.info(f"Processed {events_processed} events from {server_name}")
+                            if last_processed == 0:
+                                logger.info(f"🧊 COLD START detected for {server_name} - processing all {len(lines)} lines without embeds")
+                                await self._process_cold_start(content, str(guild_id), server_id)
+                            else:
+                                logger.info(f"🔥 HOT START detected for {server_name} - last processed: {last_processed}, current: {len(lines)}")
+                                # Use the actual parse_log_content method for proper event processing
+                                embeds = await self.parse_log_content(content, str(guild_id), server_id)
+                                
+                                if embeds:
+                                    logger.info(f"✅ Generated {len(embeds)} events from {server_name}")
+                                    # TODO: Send embeds to appropriate channels
+                                    # This would require channel routing logic
+                                else:
+                                    logger.info(f"📊 No new events generated from {server_name}")
                         else:
                             logger.info(f"Log file {log_path} is empty")
                             

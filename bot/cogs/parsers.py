@@ -494,7 +494,9 @@ class Parsers(commands.Cog):
 
                 embed.add_field(
                     name="🔄 Unified Log Parser",
-                    value=f"**Status:** ✅ Active\n**Active Sessions:** {status['active_sessions']}\n**SFTP Connections:** {status['sftp_connections']}\n**File States:** {status['file_states']}",
+                    value=f"**Status:** ✅ Active\n**Active Sessions:** {status['active_sessions']}\n**Tracked Servers:** {status['total_tracked_servers']}\n**SFTP Connections:** {status['sftp_connections']}\n**Connection Status:** {status['connection_status']}",
+                    inline=False
+                )s']}\n**SFTP Connections:** {status['sftp_connections']}\n**File States:** {status['file_states']}",
                     inline=False
                 )
 
