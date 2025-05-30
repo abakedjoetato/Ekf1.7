@@ -1,3 +1,4 @@
+# Improved final status message to show mode and events processed
 """Update send_log_embeds to use server-specific channels"""
 """
 Emerald's Killfeed - Unified Log Parser System
@@ -440,6 +441,9 @@ class UnifiedLogParser:
                 logger.error(f"Error processing log line: {e}")
                 continue
 
+        # Final status logging
+        logger.info(f"🔍 Parser completed: found {len(embeds)} events from {len(lines)} new lines")
+
         return embeds
 
     async def _load_persistent_state(self):
@@ -689,164 +693,4 @@ class UnifiedLogParser:
                             await self.parse_server_logs(guild_id, server)
                             total_servers_processed += 1
                         except Exception as e:
-                            logger.error(f"Failed to parse logs for server {server.get('name', 'Unknown')}: {e}")
-                            continue
-
-                logger.info(f"Unified log parser completed - processed {total_servers_processed} servers")
-
-            except Exception as e:
-                logger.error(f"Failed to process guilds: {e}")
-
-        except Exception as e:
-            logger.error(f"Error in unified log parser: {e}")
-
-    async def _process_cold_start(self, content: str, guild_id: str, server_id: str):
-        """Process content during cold start - parse events but suppress embeds"""
-        lines = content.splitlines()
-        total_lines = len(lines)
-        events_parsed = 0
-
-        logger.info(f"🧊 COLD START: Processing {total_lines} lines without embeds")
-
-        for line in lines:
-            try:
-                # Parse mission events for state tracking only
-                for pattern_name, pattern in self.patterns.items():
-                    if pattern_name.startswith('mission_'):
-                        match = pattern.search(line)
-                        if match:
-                            events_parsed += 1
-                            # Track the event but don't create embeds
-                            logger.debug(f"Cold start: Parsed {pattern_name} (no embed)")
-                            break
-
-            except Exception as e:
-                logger.debug(f"Error processing cold start line: {e}")
-                continue
-
-        # Update file state after cold start to mark all lines as processed
-        server_key = f"{guild_id}_{server_id}"
-        self.file_states[server_key] = {
-            'line_count': total_lines,
-            'last_updated': datetime.now(timezone.utc).isoformat()
-        }
-
-        # Also save persistent state
-        await self._save_persistent_state()
-
-        logger.info(f"🧊 COLD START completed: {events_parsed} events parsed without embeds, file state updated to {total_lines} lines for server {server_key}")
-
-    async def parse_server_logs(self, guild_id: int, server: Dict[str, Any]):
-        """Parse logs for a specific server using SFTP"""
-        server_name = server.get('name', 'Unknown')
-        try:
-            server_id = str(server.get('_id', 'unknown'))
-            host = server.get('host')
-            ssh_port = server.get('port', 22)  # Use 'port' field like other parsers
-            ssh_user = server.get('username')   # Use 'username' field like other parsers
-            ssh_password = server.get('password')  # Use 'password' field like other parsers
-            # Fix directory resolution logic to match killfeed parser format: {host}_{_id}/Logs/Deadside.log
-            log_path = server.get('log_path', f'./{host}_{server_id}/Logs/Deadside.log')
-
-            if not all([host, ssh_user, ssh_password]):
-                logger.warning(f"Missing SFTP credentials for server {server_name} - host: {host}, user: {ssh_user}, pass: {'***' if ssh_password else 'None'}")
-                return
-
-            logger.info(f"Connecting to server {server_name} ({host}:{ssh_port})")
-
-            # Create SFTP connection with host-specific key
-            connection_key = f"{guild_id}_{server_id}_{host}_{ssh_port}"
-
-            # Validate host format
-            if not host or not isinstance(host, str) or len(host.strip()) == 0:
-                logger.error(f"Invalid host format for server {server_name}: '{host}'")
-                return
-
-            host = host.strip()  # Clean any whitespace
-            logger.info(f"Attempting SFTP connection to: {host}:{ssh_port} with user: {ssh_user}")
-
-            # Use existing connection or create new one
-            if connection_key not in self.sftp_connections:
-                try:
-                    conn = await asyncssh.connect(
-                        host,
-                        port=ssh_port,
-                        username=ssh_user,
-                        password=ssh_password,
-                        known_hosts=None,
-                        client_keys=None,
-                        server_host_key_algs=['ssh-rsa', 'rsa-sha2-256', 'rsa-sha2-512'],
-                        kex_algs=['diffie-hellman-group14-sha256', 'diffie-hellman-group16-sha512', 'ecdh-sha2-nistp256', 'ecdh-sha2-nistp384', 'ecdh-sha2-nistp521'],
-                        encryption_algs=['aes128-ctr', 'aes192-ctr', 'aes256-ctr', 'aes128-cbc', 'aes192-cbc', 'aes256-cbc'],
-                        mac_algs=['hmac-sha2-256', 'hmac-sha2-512', 'hmac-sha1'],
-                        connect_timeout=30.0,  # 30 second timeout
-                        login_timeout=30.0,
-                        compression_algs=None  # Disable compression for better compatibility
-                    )
-                    self.sftp_connections[connection_key] = conn
-                    logger.info(f"Successfully connected to {host}:{ssh_port}")
-                except Exception as e:
-                    logger.error(f"Failed to connect to {host}:{ssh_port}: {e}")
-                    return
-
-            # Get the SFTP connection
-            conn = self.sftp_connections[connection_key]
-
-            try:
-                # Create SFTP client
-                async with conn.start_sftp_client() as sftp:
-                    logger.info(f"Reading log file: {log_path}")
-
-                    # Check if log file exists
-                    try:
-                        file_stat = await sftp.stat(log_path)
-                        file_size = file_stat.size
-                        logger.info(f"Log file found - size: {file_size} bytes")
-
-                        # Read the log file content
-                        async with sftp.open(log_path, 'r') as log_file:
-                            content = await log_file.read()
-
-                        if content:
-                            lines = content.splitlines()
-                            logger.info(f"Read {len(lines)} lines from {server_name}")
-
-                            # Check if this is a cold start or hot start
-                            server_key = f"{guild_id}_{server_id}"
-                            stored_state = self.file_states.get(server_key, {})
-                            last_processed = stored_state.get('line_count', 0)
-
-                            is_warm_start = last_processed > 0
-
-                            if not is_warm_start:
-                                logger.info(f"🧊 COLD START detected for {server_name} - processing all {len(lines)} lines without embeds")
-                                await self._process_cold_start(content, str(guild_id), server_id)
-                            else:
-                                logger.info(f"🔥 HOT START detected for {server_name} - last processed: {last_processed}, current: {len(lines)}")
-                                # Use the actual parse_log_content method for proper event processing
-                                embeds = await self.parse_log_content(content, str(guild_id), server_id)
-
-                                # Log parser status and results
-                                mode = "warm start" if is_warm_start else "cold start"
-                                logger.info(f"🔍 Parser running in {mode} mode - found {len(embeds)} events")
-
-                                if embeds:
-                                    logger.info(f"✅ Generated {len(embeds)} events from {server_name}")
-                                    # Send embeds to configured channels
-                                    await self.send_log_embeds(guild_id, server_id, embeds)
-                                else:
-                                    logger.info(f"📊 No new events generated from {server_name}")
-                        else:
-                            logger.info(f"Log file {log_path} is empty")
-
-                    except FileNotFoundError:
-                        logger.warning(f"Log file not found: {log_path}")
-                    except Exception as e:
-                        logger.error(f"Error reading log file {log_path}: {e}")
-
-            except Exception as e:
-                logger.error(f"SFTP error for {server_name}: {e}")
-
-        except Exception as e:
-            logger.error(f"Error in parse_server_logs for {server_name}: {e}")
-            return
+                            logger.error(
