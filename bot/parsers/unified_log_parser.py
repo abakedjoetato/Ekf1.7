@@ -558,6 +558,68 @@ class UnifiedLogParser:
         # This would require channel configuration and Discord API calls
         pass
 
+    async def send_log_embeds(self, embeds: List[discord.Embed], guild_id: int, server_id: str):
+        """Send embeds to appropriate channels with default fallback logic"""
+        try:
+            # Get guild configuration
+            guild_config = await self.db_manager.get_guild(guild_id)
+            if not guild_config:
+                logger.warning(f"No guild configuration found for {guild_id}")
+                return
+
+            # Get server-specific channels and default channels
+            server_channels = guild_config.get('server_channels', {})
+            specific_channels = server_channels.get(server_id, {})
+            default_channels = server_channels.get('default', {})
+
+            # Process each embed
+            for embed in embeds:
+                channel_type = self._determine_channel_type(embed)
+                if not channel_type:
+                    continue
+
+                # Try to find appropriate channel (server-specific first, then default)
+                channel_id = (specific_channels.get(channel_type) or 
+                            default_channels.get(channel_type))
+
+                if channel_id:
+                    try:
+                        channel = self.bot.get_channel(channel_id)
+                        if channel:
+                            await channel.send(embed=embed)
+                            logger.info(f"Sent {channel_type} event to {channel.name} (ID: {channel_id})")
+                        else:
+                            logger.warning(f"Channel {channel_id} not found for {channel_type} event")
+                    except Exception as e:
+                        logger.error(f"Failed to send {channel_type} event to channel {channel_id}: {e}")
+                else:
+                    logger.debug(f"No {channel_type} channel configured for server {server_id} or default")
+
+        except Exception as e:
+            logger.error(f"Failed to send log embeds: {e}")
+
+    def _determine_channel_type(self, embed: discord.Embed) -> Optional[str]:
+        """Determine which channel type an embed should go to based on its content"""
+        if not embed.title:
+            return None
+
+        title_lower = embed.title.lower()
+        
+        # Map embed types to channel types
+        if any(keyword in title_lower for keyword in ['airdrop', 'crate']):
+            return 'events'
+        elif any(keyword in title_lower for keyword in ['mission', 'objective']):
+            return 'events'
+        elif any(keyword in title_lower for keyword in ['helicopter', 'heli', 'crash']):
+            return 'events'
+        elif any(keyword in title_lower for keyword in ['connect', 'disconnect', 'join', 'left']):
+            return 'connections'
+        elif any(keyword in title_lower for keyword in ['bounty']):
+            return 'bounties'
+        else:
+            # Default to events for most server activities
+            return 'events'
+
     async def run_log_parser(self):
         """Main parsing method - unified entry point with cold/hot start detection"""
         try:
@@ -731,8 +793,8 @@ class UnifiedLogParser:
                                 
                                 if embeds:
                                     logger.info(f"✅ Generated {len(embeds)} events from {server_name}")
-                                    # TODO: Send embeds to appropriate channels
-                                    # This would require channel routing logic
+                                    # Send embeds to configured channels
+                                    await self.send_log_embeds(embeds, guild_id, server_id)
                                 else:
                                     logger.info(f"📊 No new events generated from {server_name}")
                         else:

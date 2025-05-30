@@ -9,6 +9,7 @@ from typing import Optional
 
 import discord
 from discord.ext import commands
+from bot.cogs.autocomplete import ServerAutocomplete
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ class AdminChannels(commands.Cog):
                          channel_type: discord.Option(str, "Channel type to configure", 
                                                      choices=['killfeed', 'leaderboard', 'playercountvc', 'events', 'connections', 'bounties']),
                          channel: discord.Option(discord.abc.GuildChannel, "Channel to set (text or voice based on type)"),
-                         server_id: discord.Option(str, "Server ID to configure channels for", required=False, default="default")):
+                         server_id: discord.Option(str, "Server to configure channels for", required=False, default="default", autocomplete=ServerAutocomplete.autocomplete_server_name)):
         """Configure a specific channel type for a specific server"""
         try:
             guild_id = ctx.guild.id
@@ -192,7 +193,7 @@ class AdminChannels(commands.Cog):
     @discord.slash_command(name="clearchannels", description="Clear all configured channels")
     @discord.default_permissions(administrator=True)
     async def clear_channels(self, ctx,
-                           server_id: discord.Option(str, "Server ID to clear channels for", required=False, default="default")):
+                           server_id: discord.Option(str, "Server to clear channels for", required=False, default="default", autocomplete=ServerAutocomplete.autocomplete_server_name)):
         """Clear all channel configurations for a specific server"""
         try:
             guild_id = ctx.guild.id
@@ -265,7 +266,7 @@ class AdminChannels(commands.Cog):
     
     @discord.slash_command(name="channels", description="View current channel configuration")
     async def view_channels(self, ctx,
-                          server_id: discord.Option(str, "Server ID to view channels for", required=False, default="default")):
+                          server_id: discord.Option(str, "Server to view channels for", required=False, default="default", autocomplete=ServerAutocomplete.autocomplete_server_name)):
         """View current channel configuration for a specific server"""
         try:
             guild_id = ctx.guild.id
