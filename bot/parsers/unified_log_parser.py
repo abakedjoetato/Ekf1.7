@@ -693,4 +693,83 @@ class UnifiedLogParser:
                             await self.parse_server_logs(guild_id, server)
                             total_servers_processed += 1
                         except Exception as e:
-                            logger.error(
+                            logger.error(f"Failed to parse logs for server {server.get('name', 'Unknown')}: {e}")
+                            continue
+
+                logger.info(f"✅ Unified parser completed - processed {total_servers_processed} servers")
+
+            except Exception as e:
+                logger.error(f"Database query failed: {e}")
+
+        except Exception as e:
+            logger.error(f"Unified log parser failed: {e}")
+
+    async def parse_server_logs(self, guild_id: int, server: dict):
+        """Parse logs for a specific server"""
+        try:
+            server_id = str(server.get('_id', 'unknown'))
+            server_name = server.get('name', 'Unknown Server')
+            host = server.get('host')
+
+            if not host:
+                logger.error(f"No host configured for server {server_name}")
+                return
+
+            # Use correct path format: {host}_{server_id}/Logs/Deadside.log
+            log_path = f'./{host}_{server_id}/Logs/Deadside.log'
+
+            try:
+                with open(log_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+
+                if not content.strip():
+                    logger.debug(f"Empty log file for {server_name}")
+                    return
+
+                # Parse log content and get embeds
+                embeds = await self.parse_log_content(content, str(guild_id), server_id)
+
+                if embeds:
+                    # Send embeds to appropriate channels
+                    for embed in embeds:
+                        # Determine channel type from embed content
+                        channel_type = self._determine_channel_type(embed)
+                        if channel_type:
+                            # Get channel for this server
+                            channel_id = await self.get_server_channel(guild_id, server_id, channel_type)
+                            if channel_id:
+                                channel = self.bot.get_channel(channel_id)
+                                if channel:
+                                    try:
+                                        await channel.send(embed=embed)
+                                        logger.debug(f"Sent {channel_type} embed to {channel.name}")
+                                    except Exception as e:
+                                        logger.error(f"Failed to send embed: {e}")
+
+            except FileNotFoundError:
+                logger.debug(f"Log file not found: {log_path}")
+            except Exception as e:
+                logger.error(f"Error reading log file {log_path}: {e}")
+
+        except Exception as e:
+            logger.error(f"Error parsing server logs: {e}")
+
+    async def _process_cold_start(self, content: str, guild_id: str, server_id: str):
+        """Process cold start - parse without generating embeds"""
+        try:
+            lines = content.splitlines()
+            server_key = f"{guild_id}_{server_id}"
+
+            # Update file state without processing events
+            self.file_states[server_key] = {
+                'line_count': len(lines),
+                'last_updated': datetime.now(timezone.utc).isoformat()
+            }
+
+            # Save persistent state
+            await self._save_persistent_state()
+
+            logger.info(f"🧊 Cold start completed - tracked {len(lines)} lines for future processing")
+
+        except Exception as e:
+            logger.error(f"Error in cold start processing: {e}")
