@@ -386,16 +386,21 @@ class KillfeedParser:
         """Parse killfeed for a single server"""
         try:
             server_id = str(server_config.get('_id', 'unknown'))
-            logger.info(f"Parsing killfeed for server {server_id} in guild {guild_id}")
-
-            # Get CSV lines
+            server_name = server_config.get('name', f'Server {server_id}')
+            
+            # Get CSV lines with source indication
             if self.bot.dev_mode:
+                logger.debug(f"🛠️ DEV MODE: Reading local CSV files for {server_name}")
                 lines = await self.get_dev_csv_files()
+                source_info = "local files"
             else:
+                host = server_config.get('host', 'unknown')
+                logger.debug(f"🚀 PROD MODE: Reading SFTP CSV files from {host} for {server_name}")
                 lines = await self.get_sftp_csv_files(server_config)
+                source_info = f"SFTP ({host})"
 
             if not lines:
-                logger.warning(f"No CSV data found for server {server_id}")
+                logger.warning(f"📊 No CSV data found for {server_name} from {source_info}")
                 return
 
             # Track processed lines for this server
@@ -403,10 +408,20 @@ class KillfeedParser:
             if server_key not in self.parsed_lines:
                 self.parsed_lines[server_key] = set()
 
+            # Count different event types
             new_events = 0
+            pvp_kills = 0
+            suicides = 0
+            skipped_duplicates = 0
+
+            logger.debug(f"📊 Processing {len(lines)} total lines from {source_info} for {server_name}")
 
             for line in lines:
-                if not line.strip() or line in self.parsed_lines[server_key]:
+                if not line.strip():
+                    continue
+                    
+                if line in self.parsed_lines[server_key]:
+                    skipped_duplicates += 1
                     continue
 
                 kill_data = await self.parse_csv_line(line)
@@ -414,28 +429,80 @@ class KillfeedParser:
                     await self.process_kill_event(guild_id, server_id, kill_data)
                     self.parsed_lines[server_key].add(line)
                     new_events += 1
+                    
+                    # Track event types for better reporting
+                    if kill_data['is_suicide']:
+                        suicides += 1
+                    else:
+                        pvp_kills += 1
 
-            logger.info(f"Processed {new_events} new kill events for server {server_id}")
+            # Detailed logging with event breakdown
+            if new_events > 0:
+                logger.info(f"✅ {server_name}: {new_events} new events ({pvp_kills} kills, {suicides} suicides)")
+                if skipped_duplicates > 0:
+                    logger.debug(f"📊 {server_name}: Skipped {skipped_duplicates} duplicate entries")
+            else:
+                logger.info(f"📊 {server_name}: No new events ({len(lines)} total lines, {skipped_duplicates} already processed)")
 
         except Exception as e:
-            logger.error(f"Failed to parse killfeed for server {server_config}: {e}")
+            server_name = server_config.get('name', f'Server {server_config.get("_id", "unknown")}')
+            logger.error(f"❌ Failed to parse killfeed for {server_name}: {e}")
 
     async def run_killfeed_parser(self):
         """Run killfeed parser for all configured servers"""
         try:
-            logger.info("Running killfeed parser...")
+            # Determine and report operating mode
+            mode = "🛠️ DEVELOPMENT" if self.bot.dev_mode else "🚀 PRODUCTION"
+            data_source = "local CSV files" if self.bot.dev_mode else "SFTP servers"
+            
+            logger.info(f"🔄 Running killfeed parser in {mode} mode using {data_source}")
 
             # Get all guilds with configured servers
             guilds_cursor = self.bot.db_manager.guilds.find({})
+            guilds_list = await guilds_cursor.to_list(length=None)
 
-            async for guild_doc in guilds_cursor:
+            if not guilds_list:
+                logger.info("📊 No guilds found in database")
+                return
+
+            total_servers = 0
+            total_events = 0
+
+            for guild_doc in guilds_list:
                 guild_id = guild_doc['guild_id']
+                guild_name = guild_doc.get('name', f'Guild {guild_id}')
                 servers = guild_doc.get('servers', [])
 
-                for server_config in servers:
-                    await self.parse_server_killfeed(guild_id, server_config)
+                if not servers:
+                    logger.debug(f"📊 No servers configured for guild {guild_name}")
+                    continue
 
-            logger.info("Killfeed parser completed")
+                logger.info(f"📡 Processing {len(servers)} servers for guild: {guild_name}")
+                
+                for server_config in servers:
+                    try:
+                        events_before = sum(len(lines) for lines in self.parsed_lines.values())
+                        await self.parse_server_killfeed(guild_id, server_config)
+                        events_after = sum(len(lines) for lines in self.parsed_lines.values())
+                        
+                        server_events = events_after - events_before
+                        total_events += server_events
+                        total_servers += 1
+                        
+                        server_name = server_config.get('name', 'Unknown')
+                        if server_events > 0:
+                            logger.info(f"✅ {server_name}: {server_events} new kill events processed")
+                        else:
+                            logger.info(f"📊 {server_name}: No new events")
+                            
+                    except Exception as e:
+                        server_name = server_config.get('name', 'Unknown')
+                        logger.error(f"❌ Failed to parse {server_name}: {e}")
+                        continue
+
+            # Final summary with mode and statistics
+            logger.info(f"🎉 Killfeed parser completed in {mode} mode")
+            logger.info(f"📊 Processed {total_servers} servers, found {total_events} total new events")
 
         except Exception as e:
             logger.error(f"Failed to run killfeed parser: {e}")
