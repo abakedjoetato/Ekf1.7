@@ -26,3 +26,7 @@ run = ["sh", "-c", "python main.py"]
 [nix]
 channel = "stable-24_05"
 packages = ["libsodium", "nettle", "openssh", "openssl"]
+
+[[ports]]
+localPort = 5000
+externalPort = 80
